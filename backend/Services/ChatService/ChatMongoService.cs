@@ -1,33 +1,60 @@
 using Microsoft.Extensions.Options;
 using MongoDB.Driver;
+using backend.Services.ChatService.Models;
 
 namespace backend.Services.ChatService
 {
     public class ChatMongoService
     {
-        private readonly IMongoCollection<ChatMessage> _messagesCollection;
+        private readonly IMongoCollection<PhienTroChuyen> _phienCollection;
+        private readonly IMongoCollection<HoiThoai> _hoiThoaiCollection;
 
         public ChatMongoService(IConfiguration config)
         {
-            // 1. Lấy chuỗi kết nối từ file appsettings.Development.json
             var connectionString = config.GetConnectionString("MongoDb");
-
-            // 2. Tạo client kết nối lên MongoDB Atlas
             var mongoClient = new MongoClient(connectionString);
-
-            // 3. Kết nối vào Database có tên "ChatStoreDB" (Nó sẽ tự tạo nếu chưa có)
             var mongoDatabase = mongoClient.GetDatabase("ChatStoreDB");
 
-            // 4. Kết nối vào Collection (tương đương với Table) có tên "Messages"
-            _messagesCollection = mongoDatabase.GetCollection<ChatMessage>("Messages");
+            // Ánh xạ 2 bảng theo models
+            _phienCollection = mongoDatabase.GetCollection<PhienTroChuyen>("PhienTroChuyen");
+            _hoiThoaiCollection = mongoDatabase.GetCollection<HoiThoai>("HoiThoai");
         }
 
-        // Lấy danh sách toàn bộ tin nhắn
-        public async Task<List<ChatMessage>> GetAsync() =>
-            await _messagesCollection.Find(_ => true).ToListAsync();
+        // --- PHIÊN TRÒ CHUYỆN ---
 
-        // Thêm 1 tin nhắn mới
-        public async Task CreateAsync(ChatMessage newMessage) =>
-            await _messagesCollection.InsertOneAsync(newMessage);
+        // Lấy danh sách các phiên chat
+        public async Task<List<PhienTroChuyen>> GetDanhSachPhienAsync() =>
+            await _phienCollection.Find(_ => true).ToListAsync();
+
+        // Tạo 1 phiên chat mới
+        public async Task TaoPhienAsync(PhienTroChuyen phien) =>
+            await _phienCollection.InsertOneAsync(phien);
+
+        // Cập nhật thông tin LastMessage, LastTime, UnreadCount... cho Phiên
+        public async Task CapNhatThongTinPhienAsync(Guid idPhien, string lastMessage)
+        {
+            var update = Builders<PhienTroChuyen>.Update
+                .Set(p => p.LastMessage, lastMessage)
+                .Set(p => p.LastTime, DateTime.UtcNow)
+                .Inc(p => p.UnreadCount, 1); // Tăng đếm chưa đọc +1
+
+            await _phienCollection.UpdateOneAsync(p => p.Id == idPhien, update);
+        }
+
+
+        // --- HỘI THOẠI (TIN NHẮN) ---
+
+        // Lấy danh sách tin nhắn của 1 phiên cụ thể
+        public async Task<List<HoiThoai>> GetTinNhanTheoPhienAsync(Guid idPhien) =>
+            await _hoiThoaiCollection.Find(h => h.MaPhien == idPhien).ToListAsync();
+
+        // Gửi 1 tin nhắn mới
+        public async Task GuiTinNhanAsync(HoiThoai tinNhan)
+        {
+            await _hoiThoaiCollection.InsertOneAsync(tinNhan);
+
+            // Tự động đẩy update phiên chat
+            await CapNhatThongTinPhienAsync(tinNhan.MaPhien, tinNhan.NoiDung);
+        }
     }
 }
