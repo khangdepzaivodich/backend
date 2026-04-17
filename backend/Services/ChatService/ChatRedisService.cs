@@ -9,7 +9,7 @@ namespace backend.Services.ChatService
 
         public ChatRedisService(IConfiguration config)
         {
-            // 1. Lấy chuỗi kết nối Upstash bạn vừa dán trong appsettings.Development.json
+            // 1. Lấy chuỗi kết nối
             var connectionString = config.GetConnectionString("Redis");
 
             // 2. Kết nối vào Redis

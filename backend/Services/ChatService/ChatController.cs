@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using backend.Services.ChatService.Models;
 
 namespace backend.Services.ChatService
 {
@@ -19,34 +20,99 @@ namespace backend.Services.ChatService
             _redisService = redisService;
         }
 
-        // Lấy toàn bộ Log Chat (Test ở trình duyệt)
-        [HttpGet]
-        public async Task<ActionResult<List<ChatMessage>>> Get()
+        // Lấy danh sách các phiên trò chuyện
+        [HttpGet("chat-sessions")]
+        public async Task<ActionResult<List<PhienTroChuyen>>> GetDanhSachPhien()
         {
-            var messages = await _chatService.GetAsync();
-            return Ok(messages);
+            var phienList = await _chatService.GetDanhSachPhienAsync();
+            return Ok(phienList);
         }
 
-        // Tạo Test 1 tin nhắn
-        [HttpPost("SendTestMessage")]
-        public async Task<IActionResult> SendTestMessage()
+        // Lấy lịch sử hội thoại của 1 phiên
+        [HttpGet("messages/{idPhien}")]
+        public async Task<ActionResult<List<HoiThoai>>> GetHoiThoai(Guid idPhien)
         {
-            var newMsg = new ChatMessage
+            var msgs = await _chatService.GetTinNhanTheoPhienAsync(idPhien);
+            return Ok(msgs);
+        }
+
+        // [API CHÍNH THỨC] - Tạo 1 Phiên Chat Mới
+        [HttpPost("create-session")]
+        public async Task<IActionResult> TaoPhien([FromBody] Guid userId)
+        {
+            var phienMoi = new PhienTroChuyen
             {
-                SenderId = "C001",
-                ReceiverId = "C002",
-                Content = "Chào bạn, áo khoác bò mẫu mới còn hàng không?",
-                Timestamp = DateTime.UtcNow
+                UserID = userId,
+                ThoiGianTao = DateTime.UtcNow,
+                TrangThai = "ACTIVE",
+                LastMessage = "Bắt đầu cuộc trò chuyện",
+                UnreadCount = 0
             };
 
-            await _chatService.CreateAsync(newMsg);
+            await _chatService.TaoPhienAsync(phienMoi);
 
-            return Ok(new { Note = "Tin nhắn đã đẩy lên MongoDB Atlas thành công nhé!", newMsg });
+            return Ok(new { Note = "Đã tạo phiên chat thành công!", Phien = phienMoi });
+        }
+
+        // [API CHÍNH THỨC] - Gửi 1 Tin Nhắn Mới vào Phiên
+        [HttpPost("send-message")]
+        public async Task<IActionResult> GuiTinNhan([FromBody] HoiThoai tinNhanMoi)
+        {
+            // Bổ sung các thông tin hệ thống trước khi lưu
+            tinNhanMoi.ThoiGianGui = DateTime.UtcNow;
+            tinNhanMoi.TrangThai = "sent";
+
+            // Nếu Client chưa tạo ID chống dội (duplicate) thì server tự tạo
+            if (tinNhanMoi.ClientID == Guid.Empty)
+                tinNhanMoi.ClientID = Guid.NewGuid();
+
+            await _chatService.GuiTinNhanAsync(tinNhanMoi);
+
+            return Ok(new { Note = "Đã gửi tin nhắn!", TinNhan = tinNhanMoi });
+        }
+
+        // [API CHÍNH THỨC] - Online Ping
+        [HttpPost("ping-online")]
+        public async Task<IActionResult> PingOnline([FromBody] Guid userId)
+        {
+            await _redisService.SetUserOnlineAsync(userId.ToString());
+            return Ok(new { Note = "Đã cập nhật trạng thái Online (Chấm xanh) cho người dùng." });
+        }
+
+        // [API CHÍNH THỨC] - Lấy trạng thái của 1 User xem có Online không
+        [HttpGet("kiem-tra-online/{userId}")]
+        public async Task<IActionResult> KiemTraOnline(Guid userId)
+        {
+            var isOnline = await _redisService.IsUserOnlineAsync(userId.ToString());
+            return Ok(new { UserId = userId, IsOnline = isOnline });
+        }
+
+        // =======================================================
+        // CÁC API TEST NHANH (Dùng trên trình duyệt)
+        // =======================================================
+
+        /*
+        // 1. Tạo Test 1 phiên + Gửi 1 tin nhắn (Gõ thẳng lên Browser)
+        [HttpGet("tao-phien-test")]
+        public async Task<IActionResult> TestTaoPhien()
+        {
+            var phienMoi = new PhienTroChuyen { UserID = Guid.NewGuid() };
+            await _chatService.TaoPhienAsync(phienMoi);
+
+            var tinNhanTest = new HoiThoai
+            {
+                MaPhien = phienMoi.Id,
+                SenderID = phienMoi.UserID,
+                NoiDung = "Shop ơi, tôi muốn mua áo khoác bò size XL!"
+            };
+            await _chatService.GuiTinNhanAsync(tinNhanTest);
+
+            return Ok(new { Note = "Đã tạo!", phienMoi, tinNhanTest });
         }
 
         // --- TEST REDIS ---
 
-        // Test tạo trạng thái 1 User đang Online
+        // 2. Test tạo trạng thái 1 User đang Online
         [HttpGet("SetOnline/{userId}")]
         public async Task<IActionResult> SetUserOnline(string userId)
         {
@@ -57,7 +123,7 @@ namespace backend.Services.ChatService
             });
         }
 
-        // Test kiểm tra xem User đó có đang Online không? (để show chấm xanh/chấm xám trong Chat)
+        // 3. Test kiểm tra xem User đó có đang Online không? (để show chấm xanh/chấm xám trong Chat)
         [HttpGet("CheckOnline/{userId}")]
         public async Task<IActionResult> CheckUserOnline(string userId)
         {
@@ -67,5 +133,6 @@ namespace backend.Services.ChatService
                 TrangThai = isOnline ? "Đang Online (Chấm xanh) 🟢" : "Đang Offline (Chấm xám) ⚪" 
             });
         }
+        */
     }
 }
