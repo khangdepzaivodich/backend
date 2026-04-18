@@ -1,31 +1,20 @@
 ﻿using backend.Services.Identity.API.Data;
+using backend.Services.Identity.API.DTOs;
+using backend.Services.Identity.API.IdentityServices.Interfaces;
 using backend.Services.Identity.API.Models;
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 
-namespace backend.Services.Identity.API.Controllers
+namespace backend.Services.Identity.API.Services.Implementations
 {
-    [Route("api/[controller]")]
-    [ApiController]
-    [Authorize] // tất cả endpoint cần login
-    public class UserController : ControllerBase
+    public class UserService : IUserService
     {
         private readonly AppDbContext _context;
 
-        public UserController(AppDbContext context)
+        public UserService(AppDbContext context)
         {
             _context = context;
-        }
-
-        // ===== Helpers =====
-        private Guid GetUserId()
-        {
-            var id = User.FindFirstValue(ClaimTypes.NameIdentifier);
-            return Guid.Parse(id!);
         }
 
         private static string HashPassword(string password)
@@ -36,15 +25,9 @@ namespace backend.Services.Identity.API.Controllers
             return Convert.ToBase64String(hash);
         }
 
-        // ================= SELF =================
-
-        // GET /api/user/me
-        [HttpGet("me")]
-        public async Task<IActionResult> Me()
+        public async Task<object?> GetMe(Guid userId)
         {
-            var userId = GetUserId();
-
-            var user = await _context.Users
+            return await _context.Users
                 .Where(x => x.MaTK == userId)
                 .Select(x => new
                 {
@@ -58,19 +41,12 @@ namespace backend.Services.Identity.API.Controllers
                     x.LastActiveAt
                 })
                 .FirstOrDefaultAsync();
-
-            if (user == null) return NotFound();
-            return Ok(user);
         }
 
-        // PUT /api/user/me
-        [HttpPut("me")]
-        public async Task<IActionResult> UpdateMe(UpdateMeRequest request)
+        public async Task<bool> UpdateMe(Guid userId, UpdateMeRequest request)
         {
-            var userId = GetUserId();
-
             var user = await _context.Users.FirstOrDefaultAsync(x => x.MaTK == userId);
-            if (user == null) return NotFound();
+            if (user == null) return false;
 
             user.HoTen = request.HoTen ?? user.HoTen;
             user.SoDienThoai = request.SoDienThoai ?? user.SoDienThoai;
@@ -78,34 +54,25 @@ namespace backend.Services.Identity.API.Controllers
             user.LastActiveAt = DateTime.UtcNow;
 
             await _context.SaveChangesAsync();
-            return Ok("Updated");
+            return true;
         }
 
-        // PUT /api/user/change-password
-        [HttpPut("change-password")]
-        public async Task<IActionResult> ChangePassword(ChangePasswordRequest request)
+        public async Task<(bool Success, string Message)> ChangePassword(Guid userId, ChangePasswordRequest request)
         {
-            var userId = GetUserId();
-
             var user = await _context.Users.FirstOrDefaultAsync(x => x.MaTK == userId);
-            if (user == null) return NotFound();
+            if (user == null) return (false, "Not found");
 
             if (user.MatKhauHash != HashPassword(request.OldPassword))
-                return BadRequest("Old password wrong");
+                return (false, "Old password wrong");
 
             user.MatKhauHash = HashPassword(request.NewPassword);
             user.LastActiveAt = DateTime.UtcNow;
 
             await _context.SaveChangesAsync();
-            return Ok("Password changed");
+            return (true, "Password changed");
         }
 
-        // ================= ADMIN =================
-
-        // GET /api/user (list)
-        [HttpGet]
-        [Authorize(Roles = "Admin")]
-        public async Task<IActionResult> GetAll([FromQuery] int page = 1, [FromQuery] int pageSize = 20)
+        public async Task<(int total, object data)> GetAll(int page, int pageSize)
         {
             var query = _context.Users.AsNoTracking();
 
@@ -127,15 +94,12 @@ namespace backend.Services.Identity.API.Controllers
                 })
                 .ToListAsync();
 
-            return Ok(new { total, page, pageSize, data });
+            return (total, data);
         }
 
-        // GET /api/user/{id}
-        [HttpGet("{id:guid}")]
-        [Authorize(Roles = "Admin")]
-        public async Task<IActionResult> GetById(Guid id)
+        public async Task<object?> GetById(Guid id)
         {
-            var user = await _context.Users
+            return await _context.Users
                 .Where(x => x.MaTK == id)
                 .Select(x => new
                 {
@@ -150,27 +114,21 @@ namespace backend.Services.Identity.API.Controllers
                     x.LastActiveAt
                 })
                 .FirstOrDefaultAsync();
-
-            if (user == null) return NotFound();
-            return Ok(user);
         }
 
-        // POST /api/user (create by admin)
-        [HttpPost]
-        [Authorize(Roles = "Admin")]
-        public async Task<IActionResult> Create(CreateUserRequest request)
+        public async Task<(bool Success, string Message, Guid? userId)> Create(CreateUserRequest request)
         {
             if (await _context.Users.AnyAsync(x => x.Email == request.Email))
-                return BadRequest("Email exists");
+                return (false, "Email exists", null);
 
             var user = new User
             {
                 MaTK = Guid.NewGuid(),
                 Email = request.Email,
-                SoDienThoai = request.SoDienThoai,
+                SoDienThoai = request.SoDienThoai ?? "",
                 MatKhauHash = HashPassword(request.Password),
                 HoTen = request.HoTen,
-                DiaChi = request.DiaChi,
+                DiaChi = request.DiaChi ?? "",
                 VaiTro = request.VaiTro ?? "User",
                 TrangThai = "Active",
                 NgayThangNamSinh = request.NgayThangNamSinh,
@@ -180,16 +138,13 @@ namespace backend.Services.Identity.API.Controllers
             _context.Users.Add(user);
             await _context.SaveChangesAsync();
 
-            return Ok(user.MaTK);
+            return (true, "Created", user.MaTK);
         }
 
-        // PUT /api/user/{id}
-        [HttpPut("{id:guid}")]
-        [Authorize(Roles = "Admin")]
-        public async Task<IActionResult> UpdateByAdmin(Guid id, UpdateUserByAdminRequest request)
+        public async Task<bool> UpdateByAdmin(Guid id, UpdateUserByAdminRequest request)
         {
             var user = await _context.Users.FirstOrDefaultAsync(x => x.MaTK == id);
-            if (user == null) return NotFound();
+            if (user == null) return false;
 
             user.HoTen = request.HoTen ?? user.HoTen;
             user.SoDienThoai = request.SoDienThoai ?? user.SoDienThoai;
@@ -198,56 +153,37 @@ namespace backend.Services.Identity.API.Controllers
             user.TrangThai = request.TrangThai ?? user.TrangThai;
 
             await _context.SaveChangesAsync();
-            return Ok("Updated");
+            return true;
         }
 
-        // DELETE /api/user/{id}
-        [HttpDelete("{id:guid}")]
-        [Authorize(Roles = "Admin")]
-        public async Task<IActionResult> Delete(Guid id)
+        public async Task<bool> Delete(Guid id)
         {
             var user = await _context.Users.FirstOrDefaultAsync(x => x.MaTK == id);
-            if (user == null) return NotFound();
+            if (user == null) return false;
 
             _context.Users.Remove(user);
             await _context.SaveChangesAsync();
-
-            return Ok("Deleted");
+            return true;
         }
 
-        // PUT /api/user/{id}/lock
-        [HttpPut("{id:guid}/lock")]
-        [Authorize(Roles = "Admin")]
-        public async Task<IActionResult> Lock(Guid id)
+        public async Task<bool> Lock(Guid id)
         {
             var user = await _context.Users.FirstOrDefaultAsync(x => x.MaTK == id);
-            if (user == null) return NotFound();
+            if (user == null) return false;
 
             user.TrangThai = "Blocked";
             await _context.SaveChangesAsync();
-
-            return Ok("Locked");
+            return true;
         }
 
-        // PUT /api/user/{id}/unlock
-        [HttpPut("{id:guid}/unlock")]
-        [Authorize(Roles = "Admin")]
-        public async Task<IActionResult> Unlock(Guid id)
+        public async Task<bool> Unlock(Guid id)
         {
             var user = await _context.Users.FirstOrDefaultAsync(x => x.MaTK == id);
-            if (user == null) return NotFound();
+            if (user == null) return false;
 
             user.TrangThai = "Active";
             await _context.SaveChangesAsync();
-
-            return Ok("Unlocked");
+            return true;
         }
     }
-
-
-    
-
-
-
-
 }

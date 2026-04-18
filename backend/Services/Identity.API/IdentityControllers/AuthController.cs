@@ -2,7 +2,7 @@
 using backend.Services.Identity.API.IdentityServices.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 
-namespace backend.Services.Identity.API.Controllers
+namespace backend.Services.Identity.API.IdentityControllers
 {
     [Route("api/[controller]")]
     [ApiController]
