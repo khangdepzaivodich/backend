@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
-
+using backend.Services.Identity.API.DTOs;
 namespace backend.Services.Identity.API.Controllers
 {
     [Route("api/[controller]")]
